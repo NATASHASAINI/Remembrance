@@ -6,3 +6,7 @@ __pycache__/
 *.mp4
 temp.wav
 Test data.m4a
+venv311/
+Remembrance/
+.env
+__pycache__/
