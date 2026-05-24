@@ -1,13 +1,3 @@
-# =========================================================
-# INSTALL
-# =========================================================
-
-!pip -q install assemblyai sentence-transformers faiss-cpu \
-pymupdf moviepy pytesseract pillow opencv-python supabase \
-openai python-docx textract google-generativeai
-
-!apt-get -qq install tesseract-ocr ffmpeg
-
 
 # =========================================================
 # IMPORTS
