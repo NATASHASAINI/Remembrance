@@ -1,11 +1,16 @@
+
 # =========================================================
-# CORE IMPORTS (SAFE)
+# CORE IMPORTS 
 # =========================================================
 
 import os
 import numpy as np
 
-# Lazy imports (avoid uvicorn crash if missing libs)
+from supabase import create_client
+from openai import OpenAI
+import assemblyai as aai
+import google.generativeai as genai
+
 fitz = None
 faiss = None
 pytesseract = None
@@ -13,10 +18,8 @@ Document = None
 VideoFileClip = None
 SentenceTransformer = None
 
-from supabase import create_client
-from openai import OpenAI
-import assemblyai as aai
-import google.generativeai as genai
+index = None
+embed_model = None
 
 
 # =========================================================
@@ -32,7 +35,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_KEY")
 
 
 # =========================================================
-# INIT (SAFE)
+# INIT CLIENTS
 # =========================================================
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -42,20 +45,6 @@ aai.settings.api_key = ASSEMBLYAI_API_KEY
 
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-
-# FAISS safe init
-index = None
-embed_model = None
-
-
-def init_models():
-    global faiss, SentenceTransformer, index, embed_model
-
-    import faiss
-    from sentence_transformers import SentenceTransformer
-
-    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-    index = faiss.IndexFlatL2(384)
 
 
 # =========================================================
@@ -70,7 +59,21 @@ SCENES = {
 
 
 # =========================================================
-# FILE PROCESSORS (SAFE IMPORTS)
+# INIT MODELS (LAZY LOADING)
+# =========================================================
+
+def init_models():
+    global faiss, SentenceTransformer, index, embed_model
+
+    import faiss
+    from sentence_transformers import SentenceTransformer
+
+    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+    index = faiss.IndexFlatL2(384)
+
+
+# =========================================================
+# FILE PROCESSORS (LAZY IMPORTS)
 # =========================================================
 
 def process_pdf(path):
@@ -109,7 +112,7 @@ def process_video(path):
 
 
 # =========================================================
-# TRANSCRIPTION
+# TRANSCRIPTION (ASSEMBLYAI)
 # =========================================================
 
 def transcribe_audio(path):
@@ -126,20 +129,23 @@ def transcribe_audio(path):
 
 
 # =========================================================
-# GPT-4o
+# GPT-4o ANALYSIS
 # =========================================================
 
 def analyze_gpt4o(text, scene):
 
+    scene_prompt = SCENES.get(scene, "General analysis")
+
     prompt = f"""
 Scene:
-{SCENES.get(scene,"")}
+{scene_prompt}
 
 Analyze:
 - emotions
 - relationships
 - personality
-- narrative
+- narrative structure
+- meaning
 
 CONTENT:
 {text[:8000]}
@@ -149,7 +155,7 @@ CONTENT:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a memory AI system."},
+                {"role": "system", "content": "You are a memory intelligence system."},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -161,12 +167,52 @@ CONTENT:
 
 
 # =========================================================
-# PIPELINE CORE
+# EMBEDDINGS + FAISS (FIXED)
+# =========================================================
+
+def add_to_vector_db(text):
+    global index, embed_model
+
+    try:
+        if embed_model is None or index is None:
+            init_models()
+
+        embedding = embed_model.encode(text)
+        vec = np.array(embedding, dtype="float32").reshape(1, -1)
+
+        index.add(vec)
+
+    except Exception as e:
+        print("Vector error:", e)
+
+
+# =========================================================
+# SUPABASE SAVE
+# =========================================================
+
+def save_to_supabase(text, analysis, scene):
+
+    try:
+        supabase.table("documents").insert({
+            "type_name": "memory_pipeline",
+            "content": text,
+            "mini_analysis": analysis,
+            "question_set": scene
+        }).execute()
+
+    except Exception as e:
+        print("Supabase error:", e)
+
+
+# =========================================================
+# MAIN PIPELINE
 # =========================================================
 
 def run(file_path, scene="scene_first"):
 
     ext = file_path.split(".")[-1].lower()
+
+    text = None
 
     if ext in ["mp3", "wav", "m4a"]:
         text = transcribe_audio(file_path)
@@ -186,34 +232,19 @@ def run(file_path, scene="scene_first"):
     elif ext in ["mp4", "mov"]:
         text = process_video(file_path)
 
-    else:
-        text = None
-
     if not text:
         return {"error": "No content extracted"}
 
+    # GPT analysis
     result = analyze_gpt4o(text, scene)
 
-    # lazy init embeddings
-    try:
-        if embed_model is None:
-            init_models()
+    # Vector store
+    add_to_vector_db(text)
 
-        vec = np.array([embed_model.encode(text)]).astype("float32")
-        index.add(vec)
+    # Supabase storage
+    save_to_supabase(text, result, scene)
 
-    except:
-        pass
-
-    # supabase save
-    try:
-        supabase.table("documents").insert({
-            "type_name": "memory_pipeline",
-            "content": text,
-            "mini_analysis": result,
-            "question_set": scene
-        }).execute()
-    except:
-        pass
-
-    return {"result": result}
+    return {
+        "scene": scene,
+        "analysis": result
+    }
