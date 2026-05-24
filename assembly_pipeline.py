@@ -1,5 +1,5 @@
 # =========================================================
-# CORE IMPORTS 
+# LIGHTWEIGHT CORE IMPORTS ONLY
 # =========================================================
 
 import os
@@ -14,13 +14,6 @@ import google.generativeai as genai
 # =========================================================
 # GLOBALS 
 # =========================================================
-
-fitz = None
-faiss = None
-pytesseract = None
-Document = None
-VideoFileClip = None
-SentenceTransformer = None
 
 index = None
 embed_model = None
@@ -39,7 +32,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_KEY")
 
 
 # =========================================================
-# CLIENT INIT
+# CLIENT INIT (SAFE)
 # =========================================================
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -63,7 +56,7 @@ SCENES = {
 
 
 # =========================================================
-# LAZY MODEL INIT
+# LAZY FAISS + EMBEDDINGS INIT
 # =========================================================
 
 def init_models():
@@ -134,7 +127,7 @@ def transcribe_audio(path):
 
 
 # =========================================================
-# GPT ANALYSIS
+# GPT-4o ANALYSIS
 # =========================================================
 
 def analyze_gpt4o(text, scene):
@@ -192,7 +185,7 @@ def add_to_vector_db(text):
 
 
 # =========================================================
-# SUPABASE SAVE
+# SUPABASE STORAGE
 # =========================================================
 
 def save_to_supabase(text, analysis, scene):
@@ -210,33 +203,42 @@ def save_to_supabase(text, analysis, scene):
 
 
 # =========================================================
+# FILE ROUTER (SAFE ENTRY POINT)
+# =========================================================
+
+def extract_text(file_path):
+
+    ext = file_path.split(".")[-1].lower()
+
+    if ext in ["mp3", "wav", "m4a"]:
+        return transcribe_audio(file_path)
+
+    if ext == "pdf":
+        return process_pdf(file_path)
+
+    if ext == "docx":
+        return process_docx(file_path)
+
+    if ext == "txt":
+        return process_txt(file_path)
+
+    if ext in ["jpg", "jpeg", "png"]:
+        return process_image(file_path)
+
+    if ext in ["mp4", "mov"]:
+        return process_video(file_path)
+
+    return None
+
+
+# =========================================================
 # MAIN PIPELINE
 # =========================================================
 
 def run(file_path, scene="scene_first"):
 
-    ext = file_path.split(".")[-1].lower()
-
-    text = None
-
     try:
-        if ext in ["mp3", "wav", "m4a"]:
-            text = transcribe_audio(file_path)
-
-        elif ext == "pdf":
-            text = process_pdf(file_path)
-
-        elif ext == "docx":
-            text = process_docx(file_path)
-
-        elif ext == "txt":
-            text = process_txt(file_path)
-
-        elif ext in ["jpg", "jpeg", "png"]:
-            text = process_image(file_path)
-
-        elif ext in ["mp4", "mov"]:
-            text = process_video(file_path)
+        text = extract_text(file_path)
 
         if not text:
             return {"error": "No content extracted"}
