@@ -1,21 +1,21 @@
-
 # =========================================================
-# IMPORTS
+# CORE IMPORTS (SAFE)
 # =========================================================
 
-import fitz
-import faiss
+import os
 import numpy as np
-import assemblyai as aai
-import pytesseract
 
-from PIL import Image
-from docx import Document
-from moviepy.editor import VideoFileClip
-from sentence_transformers import SentenceTransformer
+# Lazy imports (avoid uvicorn crash if missing libs)
+fitz = None
+faiss = None
+pytesseract = None
+Document = None
+VideoFileClip = None
+SentenceTransformer = None
+
 from supabase import create_client
-from google.colab import files
 from openai import OpenAI
+import assemblyai as aai
 import google.generativeai as genai
 
 
@@ -24,27 +24,38 @@ import google.generativeai as genai
 # =========================================================
 
 SUPABASE_URL = "https://tbpdhybqbjucoxdizlgw.supabase.co"
-SUPABASE_KEY = "YOUR_SUPABASE_KEY"
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "YOUR_SUPABASE_KEY")
 
-ASSEMBLYAI_API_KEY = "YOUR_ASSEMBLYAI_KEY"
-OPENAI_API_KEY = "YOUR_OPENAI_KEY"
-GEMINI_API_KEY = "YOUR_GEMINI_KEY"
+ASSEMBLYAI_API_KEY = os.getenv("ASSEMBLYAI_API_KEY", "YOUR_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "YOUR_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_KEY")
 
 
 # =========================================================
-# INIT
+# INIT (SAFE)
 # =========================================================
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 aai.settings.api_key = ASSEMBLYAI_API_KEY
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
 
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
-index = faiss.IndexFlatL2(384)
+# FAISS safe init
+index = None
+embed_model = None
+
+
+def init_models():
+    global faiss, SentenceTransformer, index, embed_model
+
+    import faiss
+    from sentence_transformers import SentenceTransformer
+
+    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
+    index = faiss.IndexFlatL2(384)
 
 
 # =========================================================
@@ -59,66 +70,34 @@ SCENES = {
 
 
 # =========================================================
-# LOGS (ONLY GPT OUTPUT)
-# =========================================================
-
-def log_processing(f):
-    print(f"\nProcessing: {f}\n")
-
-def log_ai_start():
-    print("\nRunning GPT-4o analysis...\n")
-
-def log_ai_output(x):
-    print("\nGPT-4o OUTPUT:\n", str(x)[:1200], "\n")
-
-def log_done(f):
-    print(f"\nDONE: {f}\n")
-
-
-# =========================================================
-# TRANSCRIPTION (FIXED)
-# =========================================================
-
-def transcribe_audio(path):
-
-    aai.settings.api_key = ASSEMBLYAI_API_KEY
-
-    transcriber = aai.Transcriber()
-
-    try:
-        config = aai.TranscriptionConfig(
-            speech_models=["universal-3-pro"],
-            punctuate=True,
-            format_text=True
-        )
-
-        result = transcriber.transcribe(path, config=config)
-
-        return result.text if result.text else None
-
-    except Exception:
-        return None
-
-
-# =========================================================
-# FILE PROCESSORS
+# FILE PROCESSORS (SAFE IMPORTS)
 # =========================================================
 
 def process_pdf(path):
+    import fitz
     pdf = fitz.open(path)
     return "\n".join(page.get_text() for page in pdf)
 
+
 def process_docx(path):
+    from docx import Document
     doc = Document(path)
     return "\n".join(p.text for p in doc.paragraphs)
+
 
 def process_txt(path):
     return open(path, encoding="utf-8").read()
 
+
 def process_image(path):
+    import pytesseract
+    from PIL import Image
     return pytesseract.image_to_string(Image.open(path))
 
+
 def process_video(path):
+    from moviepy.editor import VideoFileClip
+
     temp_audio = "temp.wav"
     clip = VideoFileClip(path)
 
@@ -130,7 +109,24 @@ def process_video(path):
 
 
 # =========================================================
-# GPT-4o ANALYSIS (ONLY OUTPUT YOU SEE)
+# TRANSCRIPTION
+# =========================================================
+
+def transcribe_audio(path):
+    transcriber = aai.Transcriber()
+
+    config = aai.TranscriptionConfig(
+        speech_models=["universal-3-pro"],
+        punctuate=True,
+        format_text=True
+    )
+
+    result = transcriber.transcribe(path, config=config)
+    return result.text if result.text else None
+
+
+# =========================================================
+# GPT-4o
 # =========================================================
 
 def analyze_gpt4o(text, scene):
@@ -143,8 +139,7 @@ Analyze:
 - emotions
 - relationships
 - personality
-- narrative structure
-- meaning
+- narrative
 
 CONTENT:
 {text[:8000]}
@@ -154,7 +149,7 @@ CONTENT:
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a deep emotional memory system."},
+                {"role": "system", "content": "You are a memory AI system."},
                 {"role": "user", "content": prompt}
             ]
         )
@@ -166,40 +161,10 @@ CONTENT:
 
 
 # =========================================================
-# GEMINI (SILENT)
-# =========================================================
-
-def analyze_gemini_hidden(text, scene):
-    try:
-        prompt = f"{SCENES.get(scene,'')}\n{text[:8000]}"
-        gemini_model.generate_content(prompt)
-    except:
-        pass
-
-
-# =========================================================
-# SUPABASE SAVE
-# =========================================================
-
-def save_to_supabase(text, analysis, scene):
-    try:
-        supabase.table("documents").insert({
-            "type_name": "memory_pipeline",
-            "content": text,
-            "mini_analysis": analysis,
-            "question_set": scene
-        }).execute()
-    except:
-        pass
-
-
-# =========================================================
-# MAIN PIPELINE (NO TEXT PREVIEW)
+# PIPELINE CORE
 # =========================================================
 
 def run(file_path, scene="scene_first"):
-
-    log_processing(file_path)
 
     ext = file_path.split(".")[-1].lower()
 
@@ -224,52 +189,31 @@ def run(file_path, scene="scene_first"):
     else:
         text = None
 
-    # ❌ NO TEXT PREVIEW PRINTED
-
     if not text:
-        print("⚠️ No valid content extracted, skipping GPT-4o")
-        return
+        return {"error": "No content extracted"}
 
-    log_ai_start()
     result = analyze_gpt4o(text, scene)
-    log_ai_output(result)
 
-    analyze_gemini_hidden(text, scene)
-
+    # lazy init embeddings
     try:
+        if embed_model is None:
+            init_models()
+
         vec = np.array([embed_model.encode(text)]).astype("float32")
         index.add(vec)
+
     except:
         pass
 
-    save_to_supabase(text, result, scene)
+    # supabase save
+    try:
+        supabase.table("documents").insert({
+            "type_name": "memory_pipeline",
+            "content": text,
+            "mini_analysis": result,
+            "question_set": scene
+        }).execute()
+    except:
+        pass
 
-    log_done(file_path)
-
-
-# =========================================================
-# UPLOAD
-# =========================================================
-
-print("\nUPLOAD FILES\n")
-uploaded = files.upload()
-
-print("\nSELECT SCENE\n")
-print("1 → Warm to Deep")
-print("2 → Scene First")
-print("3 → Relational Lens")
-
-choice = input("Enter choice: ")
-
-scene_map = {
-    "1": "warm_to_deep",
-    "2": "scene_first",
-    "3": "relational_lens"
-}
-
-ACTIVE_SCENE = scene_map.get(choice, "scene_first")
-
-print("\nSelected:", ACTIVE_SCENE)
-
-for f in uploaded.keys():
-    run(f, ACTIVE_SCENE)
+    return {"result": result}
