@@ -1,4 +1,3 @@
-
 # =========================================================
 # CORE IMPORTS 
 # =========================================================
@@ -10,6 +9,11 @@ from supabase import create_client
 from openai import OpenAI
 import assemblyai as aai
 import google.generativeai as genai
+
+
+# =========================================================
+# GLOBALS 
+# =========================================================
 
 fitz = None
 faiss = None
@@ -35,7 +39,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_KEY")
 
 
 # =========================================================
-# INIT CLIENTS
+# CLIENT INIT
 # =========================================================
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -59,7 +63,7 @@ SCENES = {
 
 
 # =========================================================
-# INIT MODELS (LAZY LOADING)
+# LAZY MODEL INIT
 # =========================================================
 
 def init_models():
@@ -73,7 +77,7 @@ def init_models():
 
 
 # =========================================================
-# FILE PROCESSORS (LAZY IMPORTS)
+# FILE PROCESSORS (ALL LAZY IMPORTS)
 # =========================================================
 
 def process_pdf(path):
@@ -89,7 +93,8 @@ def process_docx(path):
 
 
 def process_txt(path):
-    return open(path, encoding="utf-8").read()
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
 
 def process_image(path):
@@ -129,7 +134,7 @@ def transcribe_audio(path):
 
 
 # =========================================================
-# GPT-4o ANALYSIS
+# GPT ANALYSIS
 # =========================================================
 
 def analyze_gpt4o(text, scene):
@@ -167,7 +172,7 @@ CONTENT:
 
 
 # =========================================================
-# EMBEDDINGS + FAISS (FIXED)
+# EMBEDDINGS + FAISS (SAFE)
 # =========================================================
 
 def add_to_vector_db(text):
@@ -214,37 +219,38 @@ def run(file_path, scene="scene_first"):
 
     text = None
 
-    if ext in ["mp3", "wav", "m4a"]:
-        text = transcribe_audio(file_path)
+    try:
+        if ext in ["mp3", "wav", "m4a"]:
+            text = transcribe_audio(file_path)
 
-    elif ext == "pdf":
-        text = process_pdf(file_path)
+        elif ext == "pdf":
+            text = process_pdf(file_path)
 
-    elif ext == "docx":
-        text = process_docx(file_path)
+        elif ext == "docx":
+            text = process_docx(file_path)
 
-    elif ext == "txt":
-        text = process_txt(file_path)
+        elif ext == "txt":
+            text = process_txt(file_path)
 
-    elif ext in ["jpg", "jpeg", "png"]:
-        text = process_image(file_path)
+        elif ext in ["jpg", "jpeg", "png"]:
+            text = process_image(file_path)
 
-    elif ext in ["mp4", "mov"]:
-        text = process_video(file_path)
+        elif ext in ["mp4", "mov"]:
+            text = process_video(file_path)
 
-    if not text:
-        return {"error": "No content extracted"}
+        if not text:
+            return {"error": "No content extracted"}
 
-    # GPT analysis
-    result = analyze_gpt4o(text, scene)
+        result = analyze_gpt4o(text, scene)
 
-    # Vector store
-    add_to_vector_db(text)
+        add_to_vector_db(text)
+        save_to_supabase(text, result, scene)
 
-    # Supabase storage
-    save_to_supabase(text, result, scene)
+        return {
+            "status": "success",
+            "scene": scene,
+            "analysis": result
+        }
 
-    return {
-        "scene": scene,
-        "analysis": result
-    }
+    except Exception as e:
+        return {"error": str(e)}
