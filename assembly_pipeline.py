@@ -1,8 +1,7 @@
-
-
 # =========================================================
-# IMPORTS
+# IMPORTS(GPT4O+GEMINI+SUPABASE+FAISS+ASSEMBLYAI)
 # =========================================================
+!pip install pymupdf faiss-cpu assemblyai pytesseract python-docx supabase # Install PyMuPDF, FAISS, AssemblyAI, pytesseract, python-docx and supabase
 import os
 import fitz
 import faiss
@@ -23,15 +22,11 @@ import google.generativeai as genai
 # CONFIG
 # =========================================================
 
-
-
-SUPABASE_URL=https://tbpdhybqbjucoxdizlgw.supabase.co
-SUPABASE_KEY=your_key_here
-
-ASSEMBLYAI_API_KEY=your_key_here
-OPENAI_API_KEY=your_key_here
-GEMINI_API_KEY=your_key_here
-
+SUPABASE_URL = "https://tbpdhybqbjucoxdizlgw.supabase.co"
+SUPABASE_KEY = "YOUR_SUPABASE_KEY"
+ASSEMBLYAI_API_KEY = "YOUR_ASSEMBLYAI_KEY"
+OPENAI_API_KEY = "YOUR_OPENAI_KEY"
+GEMINI_API_KEY = "YOUR_GEMINI_KEY"
 
 
 # =========================================================
@@ -315,19 +310,13 @@ from google.colab import files
 print("\nUPLOAD FILES\n")
 uploaded = files.upload()
 
-print("\nSelect Scene:\n1 warm_to_deep\n2 scene_first\n3 relational_lens")
-
-choice = input("Enter choice: ")
-
-scene_map = {
-    "1": "warm_to_deep",
-    "2": "scene_first",
-    "3": "relational_lens"
-}
-
-ACTIVE_SCENE = scene_map.get(choice, "scene_first")
-
-log(f"Selected: {ACTIVE_SCENE}")
+SCENES = [
+    "warm_to_deep",
+    "scene_first",
+    "relational_lens"
+]
 
 for f in uploaded.keys():
-    run(f, ACTIVE_SCENE)
+    for scene in SCENES:
+        log(f"\nProcessing {f} with scene: {scene}")
+        run(f, scene)
